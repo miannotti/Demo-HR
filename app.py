@@ -7,7 +7,6 @@ import plotly.graph_objects as go
 st.title("Evaluación de Candidatos y Probabilidad de Contratación")
 
 # Carga y cacheo del modelo entrenado
-#@st.cache(allow_output_mutation=True)
 @st.cache_resource
 def load_model():
     return joblib.load('modelo_entrenado.pkl')
@@ -36,15 +35,22 @@ features = [
 
 # Verificación de columnas necesarias
 def validate_features(df, features):
-    missing = [col for col in features if col not in df.columns]
+    actual = set(df.columns)
+    expected = set(features)
+    missing = expected - actual
+    extra = actual - expected
     if missing:
         st.error(f"El dataset debe contener las columnas: {', '.join(missing)}")
         st.stop()
+    if extra:
+        st.info(f"Columnas adicionales no usadas en el modelo: {', '.join(extra)}")
 
 validate_features(df, features)
 
-# Generación de predicciones y probabilidades
-X = df[features]
+# Forzar uso exacto de columnas en orden correcto
+X = df.loc[:, features]
+
+# Predicciones
 df['prediccion_contratacion'] = model.predict(X)
 df['probabilidad_contratacion'] = model.predict_proba(X)[:, 1]
 
@@ -62,7 +68,6 @@ df_filtrado = df[df['vacante_id'] == vacante_seleccionada].sort_values(
 )
 
 # Gráfico interactivo de probabilidad de contratación por candidato
-# Este gráfico muestra, para la vacante seleccionada, la probabilidad estimada de contratación de cada candidato
 fig = go.Figure()
 fig.add_trace(
     go.Bar(
@@ -94,7 +99,6 @@ st.markdown(
 )
 
 # Visualización de los Top N candidatos
-# Esta tabla presenta los mejores candidatos según su probabilidad de contratación
 top_n = st.slider(
     "Número de candidatos a mostrar", min_value=1, max_value=len(df_filtrado), value=min(5, len(df_filtrado))
 )
