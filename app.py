@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import joblib
 import plotly.graph_objects as go
+from sklearn.preprocessing import OneHotEncoder
 
 # Título de la aplicación
 st.title("Evaluación de Candidatos y Probabilidad de Contratación")
@@ -13,7 +14,7 @@ def load_model():
 
 model = load_model()
 
-# Subida o carga del nuevo dataset
+# Subida del nuevo dataset
 uploaded_file = st.file_uploader("Sube tu nuevo dataset (CSV)", type=['csv'])
 if uploaded_file:
     df = pd.read_csv(uploaded_file)
@@ -21,53 +22,50 @@ else:
     st.warning("Por favor, sube un archivo CSV para continuar.")
     st.stop()
 
-# Definición de las columnas utilizadas por el modelo
-features = [
-    'educacion',
-    'experiencia_anios',
-    'experiencia_sector',
-    'certificaciones',
-    'puntaje_test',
-    'puntaje_entrevista',
-    'nivel_ingles',
-    'referencia_interna'
-]
+# Columnas utilizadas por el modelo
+categorical_cols = ["educacion", "experiencia_sector", "nivel_ingles"]
+numerical_cols = ["experiencia_anios", "certificaciones", "puntaje_test", "puntaje_entrevista", "referencia_interna"]
+all_cols = categorical_cols + numerical_cols
 
-# Verificación de columnas necesarias
-def validate_features(df, features):
-    actual = set(df.columns)
-    expected = set(features)
-    missing = expected - actual
-    extra = actual - expected
+# Validación de columnas
+def validate_features(df, cols):
+    missing = [col for col in cols if col not in df.columns]
     if missing:
-        st.error(f"El dataset debe contener las columnas: {', '.join(missing)}")
+        st.error(f"Faltan columnas requeridas en el CSV: {', '.join(missing)}")
         st.stop()
-    if extra:
-        st.info(f"Columnas adicionales no usadas en el modelo: {', '.join(extra)}")
 
-validate_features(df, features)
+validate_features(df, all_cols)
 
-# Forzar uso exacto de columnas en orden correcto
-X = df.loc[:, features]
+# Preprocesamiento igual al entrenamiento
+encoder = OneHotEncoder(sparse_output=False, handle_unknown='ignore')
+encoder.fit(df[categorical_cols])  # Entrenamos el encoder sobre los datos cargados
+encoded_cat_df = pd.DataFrame(encoder.transform(df[categorical_cols]), columns=encoder.get_feature_names_out())
 
-# Predicciones
-df['prediccion_contratacion'] = model.predict(X)
-df['probabilidad_contratacion'] = model.predict_proba(X)[:, 1]
+# Concatenar con variables numéricas
+X = pd.concat([encoded_cat_df, df[numerical_cols].reset_index(drop=True)], axis=1)
 
-# Mostrar tabla con todas las predicciones
+# Predicción
+df["probabilidad_contratacion"] = model.predict_proba(X)[:, 1]
+df["prediccion_contratacion"] = model.predict(X)
+
+# Mostrar tabla con predicciones
 st.subheader("Resultados de Predicciones")
 st.dataframe(df)
 
-# Selección de vacante para el análisis
+# Selección de vacante
+if 'vacante_id' not in df.columns:
+    st.warning("La columna 'vacante_id' no está en el dataset. No se puede continuar con el análisis por vacante.")
+    st.stop()
+
 vacantes = df['vacante_id'].unique().tolist()
 vacante_seleccionada = st.selectbox("Selecciona Vacante", vacantes)
 
-# Filtrado y ordenación de candidatos por vacante seleccionada
+# Filtrado y ordenación
 df_filtrado = df[df['vacante_id'] == vacante_seleccionada].sort_values(
     'probabilidad_contratacion', ascending=False
 )
 
-# Gráfico interactivo de probabilidad de contratación por candidato
+# Gráfico interactivo
 fig = go.Figure()
 fig.add_trace(
     go.Bar(
@@ -92,13 +90,13 @@ fig.update_layout(
 
 st.plotly_chart(fig)
 
-# Comentario explicativo del gráfico
+# Comentario gráfico
 st.markdown(
     "**Gráfico de Barras**: Muestra la probabilidad de contratación de cada candidato para la vacante seleccionada. "
     "Los candidatos están ordenados de mayor a menor probabilidad, facilitando la identificación de los mejores perfiles."
 )
 
-# Visualización de los Top N candidatos
+# Top candidatos
 top_n = st.slider(
     "Número de candidatos a mostrar", min_value=1, max_value=len(df_filtrado), value=min(5, len(df_filtrado))
 )
@@ -113,7 +111,7 @@ st.table(
     ]]
 )
 
-# Comentario explicativo de la tabla
+# Comentario final
 st.markdown(
     "**Tabla de los Top Candidatos**: Presenta los candidatos mejor posicionados según la probabilidad de contratación, "
     "junto con sus características clave."
